@@ -1,0 +1,215 @@
+from enum import Enum, auto
+from struct import unpack, calcsize
+
+try:
+    import bson
+except ImportError:
+    _have_bson = False
+else:
+    _have_bson = True
+
+
+__version__ = "0.1.0"
+
+
+class StructError(Exception):
+    pass
+
+
+class StructDeclarationError(StructError):
+    pass
+
+
+class StructSizeMismatch(StructError):
+    pass
+
+
+class StructSizeUnknown(StructError):
+    pass
+
+
+class Endianess(Enum):
+    Native = "="
+    Little = "<"
+    Big    = ">"
+
+
+class Types(Enum):
+    Int8    = auto()
+    Int16   = auto()
+    Int32   = auto()
+    Int64   = auto()
+    UInt8   = auto()
+    UInt16  = auto()
+    UInt32  = auto()
+    UInt64  = auto()
+    Float   = auto()
+    Double  = auto()
+    Char    = auto()
+    CString = auto()
+    BSON    = auto()
+
+
+globals().update(Endianess.__members__)
+globals().update(Types.__members__)
+
+
+def _endianess_code(endianess):
+    if not isinstance(endianess, Endianess):
+        raise TypeError(f"{endianess!r} is not a valid endianess")
+    return endianess.value
+
+
+def _simple_unpacker(fmt):
+    size = calcsize(fmt)
+    def unpacker(buf, endianess=Native):
+        fmt_with_endianess = f"{_endianess_code(endianess)}{fmt}"
+        value, = unpack(fmt_with_endianess, buf[:size])
+        return value, buf[size:]
+    return unpacker
+
+
+def _string_unpack(buf, endianess=None):
+    string, sep, tail = buf.partition(b"\0")
+    if not sep:
+        raise ValueError("Unterminated string in buffer")
+    return string, tail
+
+
+def _bson_unpack(buf, endianess=None):
+    size, = unpack("<i", buf[:4])
+    return bson.decode(buf[:size]), buf[size:]
+
+
+def _substruct_unpacker(cls):
+    def unpacker(buf, endianess=None):
+        ret = cls(buf, exact=False)
+        return ret, buf[sizeof(ret):]
+    return unpacker
+
+
+def _optional_unpacker(base_unpacker, default):
+    def unpacker(buf, endianess=Native):
+        if not buf:
+            return default, buf
+        return base_unpacker(buf, endianess)
+    return unpacker
+
+
+_base_unpackers = {
+    Int8:    _simple_unpacker("b"),
+    Int16:   _simple_unpacker("h"),
+    Int32:   _simple_unpacker("i"),
+    Int64:   _simple_unpacker("q"),
+    UInt8:   _simple_unpacker("B"),
+    UInt16:  _simple_unpacker("H"),
+    UInt32:  _simple_unpacker("I"),
+    UInt64:  _simple_unpacker("Q"),
+    Float:   _simple_unpacker("f"),
+    Double:  _simple_unpacker("d"),
+    Char:    _simple_unpacker("c"),
+    CString: _string_unpack,
+    BSON:    _bson_unpack
+}
+
+_fixed_size_types = {
+    Int8:   1,
+    Int16:  2,
+    Int32:  4,
+    Int64:  8,
+    UInt8:  1,
+    UInt16: 2,
+    UInt32: 4,
+    UInt64: 8,
+    Float:  4,
+    Double: 8,
+    Char:   1,
+}
+
+
+def is_struct_class(cls):
+    return isinstance(cls, type) and hasattr(cls, "_struct_members")
+
+
+def sizeof(x):
+    if is_struct_class(x):
+        if x._struct_predicted_size is not None:
+            return x._struct_predicted_size
+        raise StructSizeUnknown("Struct template contains members of non-fixed length, cannot deduce total struct size before utilization")
+    if hasattr(x, "_struct_decoded_size"):
+        return x._struct_decoded_size
+    raise TypeError("x must be a struct class or struct object")
+
+
+def add_method(cls):
+    def decorator(f):
+        setattr(cls, f.__name__, f)
+    return decorator
+
+
+def struct(endianess=Native):
+    def decorator(cls):
+        annotations = getattr(cls, "__annotations__", {})
+        cls._struct_members = {}
+        cls._struct_predicted_size = 0
+        processing_optionals = False
+        for name, type_ in annotations.items():
+            if cls._struct_predicted_size is not None:
+                try:
+                    cls._struct_predicted_size += _fixed_size_types[type_]
+                except KeyError:
+                    cls._struct_predicted_size = None
+
+            if is_struct_class(type_):
+                unpacker = _substruct_unpacker(type_)
+            elif type_ in _base_unpackers:
+                if type_ is BSON and not _have_bson:
+                    raise StructDeclarationError("BSON support is not available (try installing pymongo)")
+                unpacker = _base_unpackers[type_]
+            else:
+                raise TypeError(f"{type_!r} is not a valid type designator for struct member {name}") from e
+
+            if hasattr(cls, name):
+                default = getattr(cls, name)
+                delattr(cls, name)
+                unpacker = _optional_unpacker(unpacker, default)
+                processing_optionals = True
+            elif processing_optionals:
+                raise StructDeclarationError("Optional members, if present, must be specified after all required ones")
+
+            cls._struct_members[name] = unpacker
+
+        cls._struct_endianess = endianess
+
+        @add_method(cls)
+        def __init__(self, buf, exact=False):
+            starting_buf_size = len(buf)
+            for name, unpacker in self._struct_members.items():
+                value, buf = unpacker(buf, self._struct_endianess)
+                setattr(self, name, value)
+            if buf and exact:
+                raise StructSizeMismatch("Struct unpacking did not consume all of provided data")
+            self._struct_decoded_size = starting_buf_size - len(buf)
+
+        @add_method(cls)
+        def __repr__(self):
+            members = (f"{name}={getattr(self, name)!r}" for name in cls._struct_members)
+            return f"{cls.__name__}({', '.join(members)})"
+
+        return cls
+    return decorator
+
+
+if __name__ == "__main__":
+    data = b"*\x00\x00\x00Hello world!\x00\x18-DT\xfb!\t@"
+
+    @struct(endianess=Little)
+    class MyStruct:
+        answer:   UInt32
+        greeting: CString
+        pi:       Double
+
+    s = MyStruct(data, exact=True)
+
+    print(s)
+    print(sizeof(s), "bytes decoded")
