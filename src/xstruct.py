@@ -1,5 +1,6 @@
 from enum import Enum, auto
 from struct import unpack, calcsize
+from contextlib import suppress
 
 try:
     import bson
@@ -9,7 +10,7 @@ else:
     _have_bson = True
 
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 
 class StructError(Exception):
@@ -132,13 +133,15 @@ def is_struct_class(cls):
 
 
 def sizeof(x):
+    with suppress(KeyError):
+        return _fixed_size_types[x]
     if is_struct_class(x):
         if x._struct_predicted_size is not None:
             return x._struct_predicted_size
-        raise StructSizeUnknown("Struct template contains members of non-fixed length, cannot deduce total struct size before utilization")
+        raise StructSizeUnknown("Struct template contains members of non-fixed size, cannot deduce total struct size before utilization")
     if hasattr(x, "_struct_decoded_size"):
         return x._struct_decoded_size
-    raise TypeError("x must be a struct class or struct object")
+    raise TypeError("x must be a struct class, struct object or a fixed size member type designator")
 
 
 def add_method(cls):
