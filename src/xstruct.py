@@ -14,7 +14,7 @@ else:
     _have_bson = True
 
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 
 class StructError(Exception):
@@ -214,6 +214,11 @@ def _make_init_method(members, defaults):
 
 
 def struct(endianess=Native):
+    cls = None
+    if isinstance(endianess, type):
+        cls = endianess
+        endianess = Native
+
     def decorator(cls):
         annotations = getattr(cls, "__annotations__", None)
         if not annotations:
@@ -273,7 +278,11 @@ def struct(endianess=Native):
             return f"{cls.__name__}({', '.join(members)})"
 
         return cls
-    return decorator
+
+    if cls is None:
+        return decorator
+    else:
+        return decorator(cls)
 
 
 if __name__ == "__main__":
