@@ -1,6 +1,10 @@
 from enum import Enum, auto
 from struct import unpack, calcsize
 from contextlib import suppress
+from functools import wraps
+from ast import (
+        Assign, Attribute, Constant, FunctionDef, Load, Module,
+        Name, Store, Subscript, arg, arguments, fix_missing_locations)
 
 try:
     import bson
@@ -150,10 +154,72 @@ def add_method(cls):
     return decorator
 
 
+def constructor(f):
+    @wraps(f)
+    @classmethod
+    def wrapper(cls, *args, **kwargs):
+        obj = cls.__new__(cls)
+        super(cls, obj).__init__()
+        f(obj, *args, **kwargs)
+        return obj
+    return wrapper
+
+
+def _make_args(names):
+    return [arg(arg=name) for name in names]
+
+
+def _make_defaults(names):
+    return [
+        Subscript(
+          value=Name(id='defaults', ctx=Load()),
+          slice=Constant(value=name),
+          ctx=Load())
+        for name in names]
+
+
+def _make_body(names):
+    return [
+        Assign(
+          targets=[
+            Attribute(
+              value=Name(id='self', ctx=Load()),
+              attr=name,
+              ctx=Store())],
+          value=Name(id=name, ctx=Load()))
+        for name in names]
+
+
+def _make_init_method(members, defaults):
+    ast = Module(
+      body=[
+        FunctionDef(
+          name='__init__',
+          args=arguments(
+            posonlyargs=[arg(arg='self')],
+            args=_make_args(members),
+            kwonlyargs=[],
+            kw_defaults=[],
+            defaults=_make_defaults(defaults.keys())),
+          body=_make_body(members),
+          decorator_list=[])],
+      type_ignores=[])
+
+    fix_missing_locations(ast)
+
+    code = compile(ast, "<xstruct: __init__ ast>", "exec")
+    namespace = {"defaults": defaults}
+    exec(code, namespace)
+    return namespace["__init__"]
+
+
 def struct(endianess=Native):
     def decorator(cls):
-        annotations = getattr(cls, "__annotations__", {})
+        annotations = getattr(cls, "__annotations__", None)
+        if not annotations:
+            raise StructDeclarationError("Struct has no members (did you forget to write type annotations?)")
         cls._struct_members = {}
+        cls._struct_defaults = {}
         cls._struct_predicted_size = 0
         processing_optionals = False
         for name, type_ in annotations.items():
@@ -175,6 +241,7 @@ def struct(endianess=Native):
             if hasattr(cls, name):
                 default = getattr(cls, name)
                 delattr(cls, name)
+                cls._struct_defaults[name] = default
                 unpacker = _optional_unpacker(unpacker, default)
                 processing_optionals = True
             elif processing_optionals:
@@ -185,7 +252,8 @@ def struct(endianess=Native):
         cls._struct_endianess = endianess
 
         @add_method(cls)
-        def __init__(self, buf, exact=False):
+        @constructor
+        def unpack(self, buf, exact=False):
             starting_buf_size = len(buf)
             for name, unpacker in self._struct_members.items():
                 value, buf = unpacker(buf, self._struct_endianess)
@@ -193,6 +261,11 @@ def struct(endianess=Native):
             if buf and exact:
                 raise StructSizeMismatch("Struct unpacking did not consume all of provided data")
             self._struct_decoded_size = starting_buf_size - len(buf)
+
+        add_method(cls)(
+                _make_init_method(
+                    cls._struct_members.keys(),
+                    cls._struct_defaults))
 
         @add_method(cls)
         def __repr__(self):
@@ -212,7 +285,7 @@ if __name__ == "__main__":
         greeting: CString
         pi:       Double
 
-    s = MyStruct(data, exact=True)
+    s = MyStruct.unpack(data, exact=True)
 
     print(s)
     print(sizeof(s), "bytes decoded")
