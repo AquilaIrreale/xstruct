@@ -337,6 +337,13 @@ def struct(endianess=Native):
         return decorator(cls)
 
 
+__all__ = [
+    "struct", "sizeof", "is_struct_class",
+    *Endianess.__members__.keys(),
+    *Types.__members__.keys()
+]
+
+
 if __name__ == "__main__":
     data = b"*\x00\x00\x00Hello world!\x00\x18-DT\xfb!\t@"
 
