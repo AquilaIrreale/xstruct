@@ -310,6 +310,10 @@ def struct(endianess=Native):
             return f"{cls.__name__}({', '.join(members)})"
 
         @add_method(cls)
+        def __bytes__(self):
+            return self.pack()
+
+        @add_method(cls)
         @constructor
         def unpack(self, buf, exact=False):
             starting_buf_size = len(buf)
