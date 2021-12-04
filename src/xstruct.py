@@ -14,7 +14,7 @@ else:
     _have_bson = True
 
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 
 class StructError(Exception):
@@ -158,35 +158,44 @@ _base_packers = {
     BSON:    _bson_pack
 }
 
+
+def _fixed_size(fmt):
+    return calcsize(f"={fmt}")
+
+
 _fixed_size_types = {
-    Int8:   1,
-    Int16:  2,
-    Int32:  4,
-    Int64:  8,
-    UInt8:  1,
-    UInt16: 2,
-    UInt32: 4,
-    UInt64: 8,
-    Float:  4,
-    Double: 8,
-    Char:   1,
+    Int8:   _fixed_size("b"),
+    Int16:  _fixed_size("h"),
+    Int32:  _fixed_size("i"),
+    Int64:  _fixed_size("q"),
+    UInt8:  _fixed_size("B"),
+    UInt16: _fixed_size("H"),
+    UInt32: _fixed_size("I"),
+    UInt64: _fixed_size("Q"),
+    Float:  _fixed_size("f"),
+    Double: _fixed_size("d"),
+    Char:   _fixed_size("c"),
 }
 
 
+def is_struct(obj):
+    return hasattr(obj, "_struct_members")
+
+
 def is_struct_class(cls):
-    return isinstance(cls, type) and hasattr(cls, "_struct_members")
+    return is_struct(cls) and isinstance(cls, type)
 
 
-def sizeof(x):
+def sizeof(obj):
     with suppress(KeyError):
-        return _fixed_size_types[x]
-    if is_struct_class(x):
-        if x._struct_predicted_size is not None:
-            return x._struct_predicted_size
-        raise StructSizeUnknown("Struct template contains members of non-fixed size, cannot deduce total struct size before utilization")
-    if hasattr(x, "_struct_decoded_size"):
-        return x._struct_decoded_size
-    raise TypeError("x must be a struct class, struct object or a fixed size member type designator")
+        return _fixed_size_types[obj]
+    if is_struct_class(obj):
+        if obj._struct_predicted_size is not None:
+            return obj._struct_predicted_size
+        raise StructSizeUnknown("Struct class contains members of non-fixed size, cannot deduce total struct size before utilization")
+    if is_struct(obj):
+        return len(obj.pack())
+    raise TypeError("obj must be a struct class, struct object or a fixed size member type designator")
 
 
 def add_method(cls):
@@ -316,13 +325,11 @@ def struct(endianess=Native):
         @add_method(cls)
         @constructor
         def unpack(self, buf, exact=False):
-            starting_buf_size = len(buf)
             for name, (unpacker, _) in self._struct_members.items():
                 value, buf = unpacker(buf, self._struct_endianess)
                 setattr(self, name, value)
             if buf and exact:
                 raise StructSizeMismatch("Struct unpacking did not consume all of provided data")
-            self._struct_decoded_size = starting_buf_size - len(buf)
 
         @add_method(cls)
         def pack(self):
@@ -342,7 +349,7 @@ def struct(endianess=Native):
 
 
 __all__ = [
-    "struct", "sizeof", "is_struct_class",
+    "struct", "sizeof", "is_struct", "is_struct_class",
     *Endianess.__members__.keys(),
     *Types.__members__.keys()
 ]
@@ -361,6 +368,6 @@ if __name__ == "__main__":
 
     print("Original data:", data)
     print("Decoded object:", s)
-    print("Bytes decoded:", sizeof(s))
+    print("Size of object:", sizeof(s))
     print("Re-encoding:", s.pack())
     print("Matches original?", "Yes" if s.pack() == data else "No")
