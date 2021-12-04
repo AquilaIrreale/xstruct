@@ -1,5 +1,5 @@
 from enum import Enum, auto
-from struct import unpack, calcsize
+from struct import pack, unpack, calcsize
 from contextlib import suppress
 from functools import wraps
 from ast import (
@@ -14,7 +14,7 @@ else:
     _have_bson = True
 
 
-__version__ = "0.1.2"
+__version__ = "0.2.0"
 
 
 class StructError(Exception):
@@ -101,6 +101,31 @@ def _optional_unpacker(base_unpacker, default):
     return unpacker
 
 
+def _simple_packer(fmt):
+    def packer(value, endianess=Native):
+        fmt_with_endianess = f"{_endianess_code(endianess)}{fmt}"
+        return pack(fmt_with_endianess, value)
+    return packer
+
+
+def _string_pack(value, endianess=None):
+    if not isinstance(value, bytes):
+        raise TypeError("C string must be a bytes object")
+    if b"\0" in value:
+        raise ValueError("Null bytes in C string")
+    return value + b"\0"
+
+
+def _bson_pack(value, endianess=None):
+    return bson.encode(value)
+
+
+def _substruct_packer(cls):
+    def packer(obj, endianess=None):
+        return obj.pack()
+    return unpacker
+
+
 _base_unpackers = {
     Int8:    _simple_unpacker("b"),
     Int16:   _simple_unpacker("h"),
@@ -115,6 +140,22 @@ _base_unpackers = {
     Char:    _simple_unpacker("c"),
     CString: _string_unpack,
     BSON:    _bson_unpack
+}
+
+_base_packers = {
+    Int8:    _simple_packer("b"),
+    Int16:   _simple_packer("h"),
+    Int32:   _simple_packer("i"),
+    Int64:   _simple_packer("q"),
+    UInt8:   _simple_packer("B"),
+    UInt16:  _simple_packer("H"),
+    UInt32:  _simple_packer("I"),
+    UInt64:  _simple_packer("Q"),
+    Float:   _simple_packer("f"),
+    Double:  _simple_packer("d"),
+    Char:    _simple_packer("c"),
+    CString: _string_pack,
+    BSON:    _bson_pack
 }
 
 _fixed_size_types = {
@@ -236,10 +277,12 @@ def struct(endianess=Native):
 
             if is_struct_class(type_):
                 unpacker = _substruct_unpacker(type_)
+                packer = _substruct_packer(type_)
             elif type_ in _base_unpackers:
                 if type_ is BSON and not _have_bson:
                     raise StructDeclarationError("BSON support is not available (try installing pymongo)")
                 unpacker = _base_unpackers[type_]
+                packer = _base_packers[type_]
             else:
                 raise TypeError(f"{type_!r} is not a valid type designator for struct member {name}") from e
 
@@ -252,20 +295,9 @@ def struct(endianess=Native):
             elif processing_optionals:
                 raise StructDeclarationError("Optional members, if present, must be specified after all required ones")
 
-            cls._struct_members[name] = unpacker
+            cls._struct_members[name] = unpacker, packer
 
         cls._struct_endianess = endianess
-
-        @add_method(cls)
-        @constructor
-        def unpack(self, buf, exact=False):
-            starting_buf_size = len(buf)
-            for name, unpacker in self._struct_members.items():
-                value, buf = unpacker(buf, self._struct_endianess)
-                setattr(self, name, value)
-            if buf and exact:
-                raise StructSizeMismatch("Struct unpacking did not consume all of provided data")
-            self._struct_decoded_size = starting_buf_size - len(buf)
 
         add_method(cls)(
                 _make_init_method(
@@ -276,6 +308,26 @@ def struct(endianess=Native):
         def __repr__(self):
             members = (f"{name}={getattr(self, name)!r}" for name in cls._struct_members)
             return f"{cls.__name__}({', '.join(members)})"
+
+        @add_method(cls)
+        @constructor
+        def unpack(self, buf, exact=False):
+            starting_buf_size = len(buf)
+            for name, (unpacker, _) in self._struct_members.items():
+                value, buf = unpacker(buf, self._struct_endianess)
+                setattr(self, name, value)
+            if buf and exact:
+                raise StructSizeMismatch("Struct unpacking did not consume all of provided data")
+            self._struct_decoded_size = starting_buf_size - len(buf)
+
+        @add_method(cls)
+        def pack(self):
+            def _pack_each():
+                for name, (_, packer) in self._struct_members.items():
+                    value = getattr(self, name)
+                    if value is not None:
+                        yield packer(value)
+            return b"".join(_pack_each())
 
         return cls
 
@@ -296,5 +348,8 @@ if __name__ == "__main__":
 
     s = MyStruct.unpack(data, exact=True)
 
-    print(s)
-    print(sizeof(s), "bytes decoded")
+    print("Original data:", data)
+    print("Decoded object:", s)
+    print("Bytes decoded:", sizeof(s))
+    print("Re-encoding:", s.pack())
+    print("Matches original?", "Yes" if s.pack() == data else "No")
