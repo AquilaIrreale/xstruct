@@ -9,12 +9,12 @@ from ast import (
 try:
     import bson
 except ImportError:
-    _have_bson = False
+    have_bson = False
 else:
-    _have_bson = True
+    have_bson = True
 
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 
 class StructError(Exception):
@@ -59,41 +59,41 @@ globals().update(Endianess.__members__)
 globals().update(Types.__members__)
 
 
-def _endianess_code(endianess):
+def endianess_code(endianess):
     if not isinstance(endianess, Endianess):
         raise TypeError(f"{endianess!r} is not a valid endianess")
     return endianess.value
 
 
-def _simple_unpacker(fmt):
+def simple_unpacker(fmt):
     size = calcsize(fmt)
     def unpacker(buf, endianess=Native):
-        fmt_with_endianess = f"{_endianess_code(endianess)}{fmt}"
+        fmt_with_endianess = f"{endianess_code(endianess)}{fmt}"
         value, = unpack(fmt_with_endianess, buf[:size])
         return value, buf[size:]
     return unpacker
 
 
-def _string_unpack(buf, endianess=None):
+def string_unpack(buf, endianess=None):
     string, sep, tail = buf.partition(b"\0")
     if not sep:
         raise ValueError("Unterminated string in buffer")
     return string, tail
 
 
-def _bson_unpack(buf, endianess=None):
+def bson_unpack(buf, endianess=None):
     size, = unpack("<i", buf[:4])
     return bson.decode(buf[:size]), buf[size:]
 
 
-def _substruct_unpacker(cls):
+def substruct_unpacker(cls):
     def unpacker(buf, endianess=None):
         ret = cls(buf, exact=False)
         return ret, buf[sizeof(ret):]
     return unpacker
 
 
-def _optional_unpacker(base_unpacker, default):
+def optional_unpacker(base_unpacker, default):
     def unpacker(buf, endianess=Native):
         if not buf:
             return default, buf
@@ -101,14 +101,14 @@ def _optional_unpacker(base_unpacker, default):
     return unpacker
 
 
-def _simple_packer(fmt):
+def simple_packer(fmt):
     def packer(value, endianess=Native):
-        fmt_with_endianess = f"{_endianess_code(endianess)}{fmt}"
+        fmt_with_endianess = f"{endianess_code(endianess)}{fmt}"
         return pack(fmt_with_endianess, value)
     return packer
 
 
-def _string_pack(value, endianess=None):
+def string_pack(value, endianess=None):
     if not isinstance(value, bytes):
         raise TypeError("C string must be a bytes object")
     if b"\0" in value:
@@ -116,65 +116,65 @@ def _string_pack(value, endianess=None):
     return value + b"\0"
 
 
-def _bson_pack(value, endianess=None):
+def bson_pack(value, endianess=None):
     return bson.encode(value)
 
 
-def _substruct_packer(cls):
+def substruct_packer(cls):
     def packer(obj, endianess=None):
         return obj.pack()
     return unpacker
 
 
-_base_unpackers = {
-    Int8:    _simple_unpacker("b"),
-    Int16:   _simple_unpacker("h"),
-    Int32:   _simple_unpacker("i"),
-    Int64:   _simple_unpacker("q"),
-    UInt8:   _simple_unpacker("B"),
-    UInt16:  _simple_unpacker("H"),
-    UInt32:  _simple_unpacker("I"),
-    UInt64:  _simple_unpacker("Q"),
-    Float:   _simple_unpacker("f"),
-    Double:  _simple_unpacker("d"),
-    Char:    _simple_unpacker("c"),
-    CString: _string_unpack,
-    BSON:    _bson_unpack
+base_unpackers = {
+    Int8:    simple_unpacker("b"),
+    Int16:   simple_unpacker("h"),
+    Int32:   simple_unpacker("i"),
+    Int64:   simple_unpacker("q"),
+    UInt8:   simple_unpacker("B"),
+    UInt16:  simple_unpacker("H"),
+    UInt32:  simple_unpacker("I"),
+    UInt64:  simple_unpacker("Q"),
+    Float:   simple_unpacker("f"),
+    Double:  simple_unpacker("d"),
+    Char:    simple_unpacker("c"),
+    CString: string_unpack,
+    BSON:    bson_unpack
 }
 
-_base_packers = {
-    Int8:    _simple_packer("b"),
-    Int16:   _simple_packer("h"),
-    Int32:   _simple_packer("i"),
-    Int64:   _simple_packer("q"),
-    UInt8:   _simple_packer("B"),
-    UInt16:  _simple_packer("H"),
-    UInt32:  _simple_packer("I"),
-    UInt64:  _simple_packer("Q"),
-    Float:   _simple_packer("f"),
-    Double:  _simple_packer("d"),
-    Char:    _simple_packer("c"),
-    CString: _string_pack,
-    BSON:    _bson_pack
+base_packers = {
+    Int8:    simple_packer("b"),
+    Int16:   simple_packer("h"),
+    Int32:   simple_packer("i"),
+    Int64:   simple_packer("q"),
+    UInt8:   simple_packer("B"),
+    UInt16:  simple_packer("H"),
+    UInt32:  simple_packer("I"),
+    UInt64:  simple_packer("Q"),
+    Float:   simple_packer("f"),
+    Double:  simple_packer("d"),
+    Char:    simple_packer("c"),
+    CString: string_pack,
+    BSON:    bson_pack
 }
 
 
-def _fixed_size(fmt):
+def fixed_size(fmt):
     return calcsize(f"={fmt}")
 
 
-_fixed_size_types = {
-    Int8:   _fixed_size("b"),
-    Int16:  _fixed_size("h"),
-    Int32:  _fixed_size("i"),
-    Int64:  _fixed_size("q"),
-    UInt8:  _fixed_size("B"),
-    UInt16: _fixed_size("H"),
-    UInt32: _fixed_size("I"),
-    UInt64: _fixed_size("Q"),
-    Float:  _fixed_size("f"),
-    Double: _fixed_size("d"),
-    Char:   _fixed_size("c"),
+fixed_size_types = {
+    Int8:   fixed_size("b"),
+    Int16:  fixed_size("h"),
+    Int32:  fixed_size("i"),
+    Int64:  fixed_size("q"),
+    UInt8:  fixed_size("B"),
+    UInt16: fixed_size("H"),
+    UInt32: fixed_size("I"),
+    UInt64: fixed_size("Q"),
+    Float:  fixed_size("f"),
+    Double: fixed_size("d"),
+    Char:   fixed_size("c"),
 }
 
 
@@ -188,7 +188,7 @@ def is_struct_class(cls):
 
 def sizeof(obj):
     with suppress(KeyError):
-        return _fixed_size_types[obj]
+        return fixed_size_types[obj]
     if is_struct_class(obj):
         if obj._struct_predicted_size is not None:
             return obj._struct_predicted_size
@@ -215,11 +215,11 @@ def constructor(f):
     return wrapper
 
 
-def _make_args(names):
+def make_args(names):
     return [arg(arg=name) for name in names]
 
 
-def _make_defaults(names):
+def make_defaults(names):
     return [
         Subscript(
           value=Name(id='defaults', ctx=Load()),
@@ -228,7 +228,7 @@ def _make_defaults(names):
         for name in names]
 
 
-def _make_body(names):
+def make_body(names):
     return [
         Assign(
           targets=[
@@ -240,18 +240,18 @@ def _make_body(names):
         for name in names]
 
 
-def _make_init_method(members, defaults):
+def make_init_method(members, defaults):
     ast = Module(
       body=[
         FunctionDef(
           name='__init__',
           args=arguments(
             posonlyargs=[arg(arg='self')],
-            args=_make_args(members),
+            args=make_args(members),
             kwonlyargs=[],
             kw_defaults=[],
-            defaults=_make_defaults(defaults.keys())),
-          body=_make_body(members),
+            defaults=make_defaults(defaults.keys())),
+          body=make_body(members),
           decorator_list=[])],
       type_ignores=[])
 
@@ -280,18 +280,18 @@ def struct(endianess=Native):
         for name, type_ in annotations.items():
             if cls._struct_predicted_size is not None:
                 try:
-                    cls._struct_predicted_size += _fixed_size_types[type_]
+                    cls._struct_predicted_size += fixed_size_types[type_]
                 except KeyError:
                     cls._struct_predicted_size = None
 
             if is_struct_class(type_):
-                unpacker = _substruct_unpacker(type_)
-                packer = _substruct_packer(type_)
-            elif type_ in _base_unpackers:
-                if type_ is BSON and not _have_bson:
+                unpacker = substruct_unpacker(type_)
+                packer = substruct_packer(type_)
+            elif type_ in base_unpackers:
+                if type_ is BSON and not have_bson:
                     raise StructDeclarationError("BSON support is not available (try installing pymongo)")
-                unpacker = _base_unpackers[type_]
-                packer = _base_packers[type_]
+                unpacker = base_unpackers[type_]
+                packer = base_packers[type_]
             else:
                 raise TypeError(f"{type_!r} is not a valid type designator for struct member {name}") from e
 
@@ -299,7 +299,7 @@ def struct(endianess=Native):
                 default = getattr(cls, name)
                 delattr(cls, name)
                 cls._struct_defaults[name] = default
-                unpacker = _optional_unpacker(unpacker, default)
+                unpacker = optional_unpacker(unpacker, default)
                 processing_optionals = True
             elif processing_optionals:
                 raise StructDeclarationError("Optional members, if present, must be specified after all required ones")
@@ -309,7 +309,7 @@ def struct(endianess=Native):
         cls._struct_endianess = endianess
 
         add_method(cls)(
-                _make_init_method(
+                make_init_method(
                     cls._struct_members.keys(),
                     cls._struct_defaults))
 
@@ -333,12 +333,12 @@ def struct(endianess=Native):
 
         @add_method(cls)
         def pack(self):
-            def _pack_each():
+            def pack_each():
                 for name, (_, packer) in self._struct_members.items():
                     value = getattr(self, name)
                     if value is not None:
                         yield packer(value)
-            return b"".join(_pack_each())
+            return b"".join(pack_each())
 
         return cls
 
