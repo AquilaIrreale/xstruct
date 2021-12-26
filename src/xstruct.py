@@ -14,7 +14,7 @@ else:
     have_bson = True
 
 
-__version__ = "1.0.2"
+__version__ = "1.0.3"
 
 
 class StructError(Exception):
@@ -88,7 +88,7 @@ def bson_unpack(buf, endianess=None):
 
 def substruct_unpacker(cls):
     def unpacker(buf, endianess=None):
-        ret = cls(buf, exact=False)
+        ret = cls.unpack(buf, exact=False)
         return ret, buf[sizeof(ret):]
     return unpacker
 
@@ -123,7 +123,7 @@ def bson_pack(value, endianess=None):
 def substruct_packer(cls):
     def packer(obj, endianess=None):
         return obj.pack()
-    return unpacker
+    return packer
 
 
 base_unpackers = {
