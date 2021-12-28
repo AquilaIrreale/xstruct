@@ -69,6 +69,8 @@ class Array:
             self.length = attrgetter(length)
         elif isinstance(length, int):
             self.length = lambda _: length
+        else:
+            raise StructDeclarationError(f"Invalid Array length {length!r}")
 
 
 def endianess_code(endianess):
