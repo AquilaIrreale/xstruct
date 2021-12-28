@@ -398,7 +398,8 @@ def struct(endianess=Native):
 
 
 __all__ = [
-    "struct", "sizeof", "is_struct", "is_struct_class",
+    "struct", "sizeof", "is_struct",
+    "is_struct_class", "Array",
     *Endianess.__members__.keys(),
     *Types.__members__.keys()
 ]
