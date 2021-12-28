@@ -2,6 +2,7 @@ from enum import Enum, auto
 from struct import pack, unpack, calcsize
 from contextlib import suppress
 from functools import wraps
+from operator import attrgetter
 from ast import (
         Assign, Attribute, Constant, FunctionDef, Load, Module,
         Name, Store, Subscript, arg, arguments, fix_missing_locations)
@@ -14,7 +15,7 @@ else:
     have_bson = True
 
 
-__version__ = "1.0.3"
+__version__ = "1.1.0"
 
 
 class StructError(Exception):
@@ -59,6 +60,17 @@ globals().update(Endianess.__members__)
 globals().update(Types.__members__)
 
 
+class Array:
+    def __init__(self, elt_type, length):
+        self.elt_type = elt_type
+        if callable(length):
+            self.length = length
+        elif isinstance(length, str):
+            self.length = attrgetter(length)
+        elif isinstance(length, int):
+            self.length = lambda _: length
+
+
 def endianess_code(endianess):
     if not isinstance(endianess, Endianess):
         raise TypeError(f"{endianess!r} is not a valid endianess")
@@ -67,34 +79,44 @@ def endianess_code(endianess):
 
 def simple_unpacker(fmt):
     size = calcsize(fmt)
-    def unpacker(buf, endianess=Native):
+    def unpacker(obj, buf, endianess=Native):
         fmt_with_endianess = f"{endianess_code(endianess)}{fmt}"
         value, = unpack(fmt_with_endianess, buf[:size])
         return value, buf[size:]
     return unpacker
 
 
-def string_unpack(buf, endianess=None):
+def string_unpack(obj, buf, endianess=None):
     string, sep, tail = buf.partition(b"\0")
     if not sep:
         raise ValueError("Unterminated string in buffer")
     return string, tail
 
 
-def bson_unpack(buf, endianess=None):
+def bson_unpack(obj, buf, endianess=None):
     size, = unpack("<i", buf[:4])
     return bson.decode(buf[:size]), buf[size:]
 
 
+def array_unpacker(base_unpacker, length_extractor):
+    def unpacker(obj, buf, endianess=Native):
+        length = length_extractor(obj)
+        ret = [None] * length
+        for i in range(length):
+            ret[i], buf = base_unpacker(obj, buf, endianess)
+        return ret, buf
+    return unpacker
+
+
 def substruct_unpacker(cls):
-    def unpacker(buf, endianess=None):
+    def unpacker(obj, buf, endianess=None):
         ret = cls.unpack(buf, exact=False)
         return ret, buf[sizeof(ret):]
     return unpacker
 
 
 def optional_unpacker(base_unpacker, default):
-    def unpacker(buf, endianess=Native):
+    def unpacker(obj, buf, endianess=Native):
         if not buf:
             return default, buf
         return base_unpacker(buf, endianess)
@@ -118,6 +140,12 @@ def string_pack(value, endianess=None):
 
 def bson_pack(value, endianess=None):
     return bson.encode(value)
+
+
+def array_packer(base_packer):
+    def packer(seq, endianess=None):
+        return b"".join(base_packer(x) for x in seq)
+    return packer
 
 
 def substruct_packer(cls):
@@ -284,6 +312,13 @@ def struct(endianess=Native):
                 except KeyError:
                     cls._struct_predicted_size = None
 
+            if isinstance(type_, Array):
+                is_array = True
+                length_extractor = type_.length
+                type_ = type_.elt_type
+            else:
+                is_array = False
+
             if is_struct_class(type_):
                 unpacker = substruct_unpacker(type_)
                 packer = substruct_packer(type_)
@@ -294,6 +329,10 @@ def struct(endianess=Native):
                 packer = base_packers[type_]
             else:
                 raise TypeError(f"{type_!r} is not a valid type designator for struct member {name}") from e
+
+            if is_array:
+                unpacker = array_unpacker(unpacker, length_extractor)
+                packer = array_packer(packer)
 
             if hasattr(cls, name):
                 default = getattr(cls, name)
@@ -326,7 +365,7 @@ def struct(endianess=Native):
         @constructor
         def unpack(self, buf, exact=False):
             for name, (unpacker, _) in self._struct_members.items():
-                value, buf = unpacker(buf, self._struct_endianess)
+                value, buf = unpacker(self, buf, self._struct_endianess)
                 setattr(self, name, value)
             if buf and exact:
                 raise StructSizeMismatch("Struct unpacking did not consume all of provided data")
@@ -356,13 +395,15 @@ __all__ = [
 
 
 if __name__ == "__main__":
-    data = b"*\x00\x00\x00Hello world!\x00\x18-DT\xfb!\t@"
+    data = b"*\0\0\0Hello world!\0\x18-DT\xfb!\t@\x03Three\0strings\0!\0"
 
     @struct(endianess=Little)
     class MyStruct:
         answer:   UInt32
         greeting: CString
         pi:       Double
+        tail_len: UInt8
+        tail:     Array(CString, "tail_len")
 
     s = MyStruct.unpack(data, exact=True)
 
