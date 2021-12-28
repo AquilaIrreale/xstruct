@@ -328,7 +328,7 @@ def struct(endianess=Native):
                 unpacker = base_unpackers[type_]
                 packer = base_packers[type_]
             else:
-                raise TypeError(f"{type_!r} is not a valid type designator for struct member {name}") from e
+                raise TypeError(f"{type_!r} is not a valid type designator for struct member {name}")
 
             if is_array:
                 unpacker = array_unpacker(unpacker, length_extractor)
