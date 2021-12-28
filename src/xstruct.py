@@ -15,7 +15,7 @@ else:
     have_bson = True
 
 
-__version__ = "1.1.1"
+__version__ = "1.1.2"
 
 
 class StructError(Exception):
@@ -61,9 +61,9 @@ globals().update(Types.__members__)
 
 
 class Array:
-    def __init__(self, elt_type, length):
+    def __init__(self, elt_type, length=None):
         self.elt_type = elt_type
-        if callable(length):
+        if callable(length) or length is None:
             self.length = length
         elif isinstance(length, str):
             self.length = attrgetter(length)
@@ -101,12 +101,20 @@ def bson_unpack(obj, buf, endianess=None):
 
 
 def array_unpacker(base_unpacker, length_extractor):
-    def unpacker(obj, buf, endianess=Native):
-        length = length_extractor(obj)
-        ret = [None] * length
-        for i in range(length):
-            ret[i], buf = base_unpacker(obj, buf, endianess)
-        return ret, buf
+    if length_extractor is not None:
+        def unpacker(obj, buf, endianess=Native):
+            length = length_extractor(obj)
+            ret = [None] * length
+            for i in range(length):
+                ret[i], buf = base_unpacker(obj, buf, endianess)
+            return ret, buf
+    else:
+        def unpacker(obj, buf, endianess=Native):
+            ret = []
+            while buf:
+                value, buf = base_unpacker(obj, buf, endianess)
+                ret.append(value)
+            return ret, buf
     return unpacker
 
 
@@ -397,7 +405,7 @@ __all__ = [
 
 
 if __name__ == "__main__":
-    data = b"*\0\0\0Hello world!\0\x18-DT\xfb!\t@\x03Three\0strings\0!\0"
+    data = b"*\0\0\0Hello world!\0\x18-DT\xfb!\t@\x03Three\0strings\0!\0abcdefg"
 
     @struct(endianess=Little)
     class MyStruct:
@@ -406,6 +414,7 @@ if __name__ == "__main__":
         pi:       Double
         tail_len: UInt8
         tail:     Array(CString, "tail_len")
+        tail2:    Array(UInt8)
 
     s = MyStruct.unpack(data, exact=True)
 
