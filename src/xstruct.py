@@ -15,7 +15,7 @@ else:
     have_bson = True
 
 
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 
 
 class StructError(Exception):
