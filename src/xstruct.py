@@ -15,7 +15,7 @@ else:
     have_bson = True
 
 
-__version__ = "1.1.2"
+__version__ = "1.2.0"
 
 
 class StructError(Exception):
@@ -60,17 +60,26 @@ globals().update(Endianess.__members__)
 globals().update(Types.__members__)
 
 
+def make_length_extractor(length):
+    if callable(length) or length is None:
+        return length
+    elif isinstance(length, str):
+        return attrgetter(length)
+    elif isinstance(length, int):
+        return lambda _: length
+    else:
+        raise StructDeclarationError(f"Invalid length expression {length!r}")
+
+
 class Array:
     def __init__(self, elt_type, length=None):
         self.elt_type = elt_type
-        if callable(length) or length is None:
-            self.length = length
-        elif isinstance(length, str):
-            self.length = attrgetter(length)
-        elif isinstance(length, int):
-            self.length = lambda _: length
-        else:
-            raise StructDeclarationError(f"Invalid Array length {length!r}")
+        self.length_extractor = make_length_extractor(length)
+
+
+class Bytes:
+    def __init__(self, length=None):
+        self.length_extractor = make_length_extractor(length)
 
 
 def endianess_code(endianess):
@@ -98,6 +107,17 @@ def string_unpack(obj, buf, endianess=None):
 def bson_unpack(obj, buf, endianess=None):
     size, = unpack("<i", buf[:4])
     return bson.decode(buf[:size]), buf[size:]
+
+
+def bytes_unpacker(length_extractor):
+    if length_extractor is not None:
+        def unpacker(obj, buf, endianess=None):
+            length = length_extractor(obj)
+            return buf[:length], buf[length:]
+    else:
+        def unpacker(obj, buf, endianess=None):
+            return buf, b""
+    return unpacker
 
 
 def array_unpacker(base_unpacker, length_extractor):
@@ -150,6 +170,10 @@ def string_pack(value, endianess=None):
 
 def bson_pack(value, endianess=None):
     return bson.encode(value)
+
+
+def bytes_pack(value, endianess=None):
+    return bytes(value)
 
 
 def array_packer(base_packer):
@@ -322,9 +346,12 @@ def struct(endianess=Native):
                 except KeyError:
                     cls._struct_predicted_size = None
 
+            if type_ is Bytes:
+                type_ = Bytes()
+
             if isinstance(type_, Array):
                 is_array = True
-                length_extractor = type_.length
+                length_extractor = type_.length_extractor
                 type_ = type_.elt_type
             else:
                 is_array = False
@@ -332,6 +359,9 @@ def struct(endianess=Native):
             if is_struct_class(type_):
                 unpacker = substruct_unpacker(type_)
                 packer = substruct_packer(type_)
+            elif isinstance(type_, Bytes):
+                unpacker = bytes_unpacker(type_.length_extractor)
+                packer = bytes_pack
             elif type_ in base_unpackers:
                 if type_ is BSON and not have_bson:
                     raise StructDeclarationError("BSON support is not available (try installing pymongo)")
@@ -399,7 +429,7 @@ def struct(endianess=Native):
 
 __all__ = [
     "struct", "sizeof", "is_struct",
-    "is_struct_class", "Array",
+    "is_struct_class", "Array", "Bytes",
     *Endianess.__members__.keys(),
     *Types.__members__.keys()
 ]
@@ -415,7 +445,8 @@ if __name__ == "__main__":
         pi:       Double
         tail_len: UInt8
         tail:     Array(CString, "tail_len")
-        tail2:    Array(UInt8)
+        tail2:    Bytes(4)
+        tail3:    Bytes
 
     s = MyStruct.unpack(data, exact=True)
 
