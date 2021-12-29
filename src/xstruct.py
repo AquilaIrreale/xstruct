@@ -416,7 +416,7 @@ def struct(endianess=Native):
                 for name, (_, packer) in self._struct_members.items():
                     value = getattr(self, name)
                     if value is not None:
-                        yield packer(value)
+                        yield packer(value, self._struct_endianess)
             return b"".join(pack_each())
 
         return cls
