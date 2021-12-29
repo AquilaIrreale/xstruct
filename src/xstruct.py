@@ -18,7 +18,7 @@ else:
     have_bson = True
 
 
-__version__ = "1.3.0"
+__version__ = "1.3.1"
 
 
 class StructError(Exception):
@@ -366,7 +366,7 @@ def struct(endianess=Native):
                 except KeyError:
                     cls._struct_predicted_size = None
 
-            if isinstance(type_, type):
+            if type_ is Bytes or isinstance(type_, type) and issubclass(type_, CustomMember):
                 type_ = type_()
 
             if isinstance(type_, Array):
