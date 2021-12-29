@@ -1,8 +1,11 @@
+import sys
+
 from enum import Enum, auto
 from struct import pack, unpack, calcsize
 from contextlib import suppress
 from functools import wraps
 from operator import attrgetter
+from abc import ABC, abstractmethod
 from ast import (
         Assign, Attribute, Constant, FunctionDef, Load, Module,
         Name, Store, Subscript, arg, arguments, fix_missing_locations)
@@ -15,7 +18,7 @@ else:
     have_bson = True
 
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 
 class StructError(Exception):
@@ -60,6 +63,13 @@ globals().update(Endianess.__members__)
 globals().update(Types.__members__)
 
 
+byteorder = {
+    Big: "big",
+    Little: "little",
+    Native: sys.byteorder
+}
+
+
 def make_length_extractor(length):
     if callable(length) or length is None:
         return length
@@ -80,6 +90,16 @@ class Array:
 class Bytes:
     def __init__(self, length=None):
         self.length_extractor = make_length_extractor(length)
+
+
+class CustomMember(ABC):
+    @abstractmethod
+    def unpack(self, obj, buf, endianess):
+        raise NotImplementedError
+
+    @abstractmethod
+    def pack(self, value, endianess):
+        raise NotImplementedError
 
 
 def endianess_code(endianess):
@@ -346,8 +366,8 @@ def struct(endianess=Native):
                 except KeyError:
                     cls._struct_predicted_size = None
 
-            if type_ is Bytes:
-                type_ = Bytes()
+            if isinstance(type_, type):
+                type_ = type_()
 
             if isinstance(type_, Array):
                 is_array = True
@@ -359,6 +379,9 @@ def struct(endianess=Native):
             if is_struct_class(type_):
                 unpacker = substruct_unpacker(type_)
                 packer = substruct_packer(type_)
+            elif isinstance(type_, CustomMember):
+                unpacker = type_.unpack
+                packer = type_.pack
             elif isinstance(type_, Bytes):
                 unpacker = bytes_unpacker(type_.length_extractor)
                 packer = bytes_pack
@@ -428,21 +451,29 @@ def struct(endianess=Native):
 
 
 __all__ = [
-    "struct", "sizeof", "is_struct",
-    "is_struct_class", "Array", "Bytes",
+    "struct", "sizeof", "is_struct", "is_struct_class",
+    "Array", "Bytes", "CustomMember",
     *Endianess.__members__.keys(),
     *Types.__members__.keys()
 ]
 
 
 if __name__ == "__main__":
-    data = b"*\0\0\0Hello world!\0\x18-DT\xfb!\t@\x03Three\0strings\0!\0abcdefg"
+    data = b"*\0\0\0Hello world!\0\x18-DT\xfb!\t@k\xf7\xef\x9c\xc7\xd3/&\xf8A`x\r\x0f\x100\x03Three\0strings\0!\0abcdefg"
+
+    class UInt128(CustomMember):
+        def unpack(self, obj, buf, endianess):
+            return int.from_bytes(buf[:16], byteorder[endianess], signed=False), buf[16:]
+
+        def pack(self, value, endianess):
+            return value.to_bytes(16, byteorder[endianess], signed=False)
 
     @struct(endianess=Little)
     class MyStruct:
         answer:   UInt32
         greeting: CString
         pi:       Double
+        big:      UInt128
         tail_len: UInt8
         tail:     Array(CString, "tail_len")
         tail2:    Bytes(4)
