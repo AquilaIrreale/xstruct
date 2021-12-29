@@ -366,15 +366,15 @@ def struct(endianess=Native):
                 except KeyError:
                     cls._struct_predicted_size = None
 
-            if type_ is Bytes or isinstance(type_, type) and issubclass(type_, CustomMember):
-                type_ = type_()
-
             if isinstance(type_, Array):
                 is_array = True
                 length_extractor = type_.length_extractor
                 type_ = type_.elt_type
             else:
                 is_array = False
+
+            if type_ is Bytes or isinstance(type_, type) and issubclass(type_, CustomMember):
+                type_ = type_()
 
             if is_struct_class(type_):
                 unpacker = substruct_unpacker(type_)
