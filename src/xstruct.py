@@ -5,7 +5,6 @@ from struct import pack, unpack, calcsize
 from contextlib import suppress
 from functools import wraps
 from operator import attrgetter
-from abc import ABC, abstractmethod
 from ast import (
         Assign, Attribute, Constant, FunctionDef, Load, Module,
         Name, Store, Subscript, arg, arguments, fix_missing_locations)
@@ -18,7 +17,7 @@ else:
     have_bson = True
 
 
-__version__ = "1.3.1"
+__version__ = "1.3.2"
 
 
 class StructError(Exception):
@@ -92,12 +91,10 @@ class Bytes:
         self.length_extractor = make_length_extractor(length)
 
 
-class CustomMember(ABC):
-    @abstractmethod
+class CustomMember:
     def unpack(self, obj, buf, endianess):
         raise NotImplementedError
 
-    @abstractmethod
     def pack(self, value, endianess):
         raise NotImplementedError
 
