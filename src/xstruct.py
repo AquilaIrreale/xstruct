@@ -37,7 +37,7 @@ else:
     have_bson = True
 
 
-__version__ = "1.3.2"
+__version__ = "1.3.3"
 
 
 class StructError(Exception):
@@ -304,8 +304,8 @@ def add_method(cls):
 
 
 def constructor(f):
-    @wraps(f)
     @classmethod
+    @wraps(f)
     def wrapper(cls, *args, **kwargs):
         obj = cls.__new__(cls)
         super(cls, obj).__init__()
