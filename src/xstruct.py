@@ -37,7 +37,7 @@ else:
     have_bson = True
 
 
-__version__ = "1.3.3"
+__version__ = "1.3.4"
 
 
 class StructError(Exception):
@@ -186,7 +186,7 @@ def optional_unpacker(base_unpacker, default):
     def unpacker(obj, buf, endianess=Native):
         if not buf:
             return default, buf
-        return base_unpacker(buf, endianess)
+        return base_unpacker(obj, buf, endianess)
     return unpacker
 
 
